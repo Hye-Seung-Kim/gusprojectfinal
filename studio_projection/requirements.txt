@@ -1,0 +1,4 @@
+rembg[cpu]
+opencv-python
+viam-sdk
+onnxruntime
