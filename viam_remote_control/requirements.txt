@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+viam-sdk
+python-dotenv
+Pillow
