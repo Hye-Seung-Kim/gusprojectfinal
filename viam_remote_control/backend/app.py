@@ -1,64 +1,100 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import asyncio
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from viam.components.base import Base
+from viam.components.camera import Camera
+import cv2
+import io
+import numpy as np
+from PIL import Image
 
-from robot_control import move, stop
-from camera_stream import get_frame
-from viam_client import close_robot
+from viam_client import connect_robot
+from config import BASE_NAME, CAMERA_NAME
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-class MoveCommand(BaseModel):
-    linear_x: float = 0.0
-    linear_y: float = 0.0
-    angular: float = 0.0
+robot = None
+base = None
+camera = None
 
 
-@app.post("/move")
-async def move_robot(cmd: MoveCommand):
-    try:
-        await move(cmd.linear_x, cmd.linear_y, cmd.angular)
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def viam_image_to_cv2(viam_image):
+    pil_img = Image.open(io.BytesIO(viam_image.data))
+    rgb = np.array(pil_img)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
-@app.post("/stop")
-async def stop_robot():
-    try:
-        await stop()
-        return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/camera")
-async def camera_feed():
-    async def frame_generator():
-        while True:
-            frame = await get_frame()
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-            )
-            await asyncio.sleep(0.05)  # ~20 fps
-
-    return StreamingResponse(
-        frame_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+@app.on_event("startup")
+async def startup():
+    global robot, base, camera
+    robot = await connect_robot()
+    base = Base.from_robot(robot=robot, name=BASE_NAME)
+    camera = Camera.from_robot(robot=robot, name=CAMERA_NAME)
+    print("Connected to Viam robot")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    await close_robot()
+    global robot
+    if robot:
+        await robot.close()
+
+
+@app.get("/")
+async def root():
+    return {"status": "backend running"}
+
+
+@app.post("/move/{direction}")
+async def move(direction: str):
+    if direction == "forward":
+        await base.move_straight(distance=30, velocity=25)
+    elif direction == "backward":
+        await base.move_straight(distance=-30, velocity=25)
+    elif direction == "left":
+        await base.spin(angle=5, velocity=15)
+    elif direction == "right":
+        await base.spin(angle=-5, velocity=15)
+    elif direction == "stop":
+        await base.stop()
+    else:
+        return JSONResponse({"error": "unknown direction"}, status_code=400)
+
+    await base.stop()
+    return {"ok": True, "direction": direction}
+
+
+async def frame_generator():
+    while True:
+        try:
+            images, _ = await camera.get_images()
+            if images:
+                frame = viam_image_to_cv2(images[0])
+                _, jpeg = cv2.imencode(".jpg", frame)
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" +
+                    jpeg.tobytes() +
+                    b"\r\n"
+                )
+        except Exception as e:
+            print("camera error:", e)
+
+        await asyncio.sleep(0.08)
+
+
+@app.get("/camera")
+async def camera_feed():
+    return StreamingResponse(
+        frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )

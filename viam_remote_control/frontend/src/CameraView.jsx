@@ -1,13 +1,14 @@
-const API_BASE = "http://localhost:8000";
+const BACKEND_URL = "http://localhost:8000";
 
 export default function CameraView() {
   return (
-    <div>
+    <section className="camera-section">
+      <h2>Live Camera</h2>
       <img
-        src={`${API_BASE}/camera`}
-        alt="Robot camera feed"
-        style={{ width: "640px", height: "480px", border: "1px solid #ccc" }}
+        className="camera-feed"
+        src={`${BACKEND_URL}/camera`}
+        alt="Viam live camera feed"
       />
-    </div>
+    </section>
   );
 }

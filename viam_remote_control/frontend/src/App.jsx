@@ -1,12 +1,21 @@
 import CameraView from "./CameraView";
 import Controls from "./Controls";
+import "./App.css";
 
-export default function App() {
+function App() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "1rem", padding: "1rem" }}>
-      <h1>Viam Remote Control</h1>
-      <CameraView />
-      <Controls />
+    <div className="app">
+      <header>
+        <h1>Gus Remote Control</h1>
+        <p>Kathy’s room → Studio projection system</p>
+      </header>
+
+      <main>
+        <CameraView />
+        <Controls />
+      </main>
     </div>
   );
 }
+
+export default App;
