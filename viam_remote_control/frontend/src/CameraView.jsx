@@ -1,11 +1,11 @@
-import { BACKEND_URL } from "./api";
+import { BACKEND_URL, withToken } from "./api";
 
-export default function CameraView() {
+export default function CameraView({ token }) {
   return (
     <section className="camera-section">
       <img
         className="camera-feed"
-        src={`${BACKEND_URL}/camera`}
+        src={withToken(`${BACKEND_URL}/camera`, token)}
         alt="Viam live camera feed"
       />
     </section>

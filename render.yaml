@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: gus-viam-remote-backend
+    runtime: python
+    rootDir: viam_remote_control
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: VIAM_ADDRESS
+        sync: false
+      - key: VIAM_API_KEY
+        sync: false
+      - key: VIAM_API_KEY_ID
+        sync: false
+      - key: CONTROL_TOKEN
+        sync: false

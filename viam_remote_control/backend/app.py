@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from viam.components.base import Base
@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 from viam_client import connect_robot
-from config import BASE_NAME, CAMERA_NAME
+from config import BASE_NAME, CAMERA_NAME, CONTROL_TOKEN
 
 app = FastAPI()
 
@@ -30,6 +30,22 @@ base = None
 camera = None
 connect_lock = asyncio.Lock()
 CAPTURE_DIR = Path(__file__).resolve().parent / "captures"
+STEP_DISTANCE_MM = 8
+STEP_VELOCITY_MM_S = 35
+TURN_ANGLE_DEG = 3
+TURN_VELOCITY_DEG_S = 25
+OFFLINE_RETRY_SECONDS = 2.0
+
+
+def token_from_request(request: Request):
+    return request.headers.get("x-control-token") or request.query_params.get("token", "")
+
+
+def require_control_token(request: Request):
+    if CONTROL_TOKEN and token_from_request(request) != CONTROL_TOKEN:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    return None
 
 
 def viam_image_to_cv2(viam_image):
@@ -81,35 +97,115 @@ async def ensure_robot_connected():
         if robot and base and camera:
             return
 
-        robot = await connect_robot()
-        base = Base.from_robot(robot=robot, name=BASE_NAME)
-        camera = Camera.from_robot(robot=robot, name=CAMERA_NAME)
-        print("Connected to Viam robot")
+        try:
+            robot = await connect_robot()
+            base = Base.from_robot(robot=robot, name=BASE_NAME)
+            camera = Camera.from_robot(robot=robot, name=CAMERA_NAME)
+            print("Connected to Viam robot")
+        except Exception:
+            robot = None
+            base = None
+            camera = None
+            raise
+
+
+async def safe_stop():
+    try:
+        if base:
+            await base.stop()
+    except Exception as e:
+        print("stop error:", e)
+
+
+async def tiny_move_straight(distance):
+    try:
+        velocity = STEP_VELOCITY_MM_S if distance > 0 else -STEP_VELOCITY_MM_S
+        await base.move_straight(
+            distance=distance,
+            velocity=velocity,
+            timeout=1,
+        )
+    finally:
+        await safe_stop()
+
+
+async def tiny_spin(angle):
+    try:
+        velocity = TURN_VELOCITY_DEG_S if angle > 0 else -TURN_VELOCITY_DEG_S
+        await base.spin(
+            angle=angle,
+            velocity=velocity,
+            timeout=1,
+        )
+    finally:
+        await safe_stop()
 
 
 @app.post("/move/{direction}")
-async def move(direction: str):
+async def move(direction: str, request: Request):
+    unauthorized = require_control_token(request)
+    if unauthorized:
+        return unauthorized
+
     try:
         await ensure_robot_connected()
 
         if direction == "forward":
-            await base.move_straight(distance=30, velocity=25)
+            await tiny_move_straight(STEP_DISTANCE_MM)
         elif direction == "backward":
-            await base.move_straight(distance=-30, velocity=25)
+            await tiny_move_straight(-STEP_DISTANCE_MM)
         elif direction == "left":
-            await base.spin(angle=5, velocity=15)
+            await tiny_spin(TURN_ANGLE_DEG)
         elif direction == "right":
-            await base.spin(angle=-5, velocity=15)
+            await tiny_spin(-TURN_ANGLE_DEG)
         elif direction == "stop":
-            await base.stop()
+            await safe_stop()
         else:
             return JSONResponse({"error": "unknown direction"}, status_code=400)
 
-        await base.stop()
         return {"ok": True, "direction": direction}
     except Exception as e:
         print("move error:", e)
         return JSONResponse({"error": "robot unavailable"}, status_code=503)
+
+
+@app.get("/diagnostics")
+async def diagnostics(request: Request):
+    unauthorized = require_control_token(request)
+    if unauthorized:
+        return unauthorized
+
+    try:
+        await ensure_robot_connected()
+        resources = [
+            {
+                "namespace": resource.namespace,
+                "type": resource.type,
+                "subtype": resource.subtype,
+                "name": resource.name,
+            }
+            for resource in robot.resource_names
+        ]
+
+        return {
+            "ok": True,
+            "robot": "connected",
+            "base_configured": BASE_NAME,
+            "camera_configured": CAMERA_NAME,
+            "resources": resources,
+        }
+    except Exception as e:
+        print("diagnostics error:", e)
+        return JSONResponse(
+            {
+                "ok": False,
+                "robot": "unavailable",
+                "error": str(e),
+                "base_configured": BASE_NAME,
+                "camera_configured": CAMERA_NAME,
+            },
+            status_code=503,
+        )
 
 
 async def frame_generator():
@@ -125,12 +221,18 @@ async def frame_generator():
                 )
         except Exception as e:
             print("camera error:", e)
+            await asyncio.sleep(OFFLINE_RETRY_SECONDS)
+            continue
 
         await asyncio.sleep(0.08)
 
 
 @app.get("/camera")
-async def camera_feed():
+async def camera_feed(request: Request):
+    unauthorized = require_control_token(request)
+    if unauthorized:
+        return unauthorized
+
     return StreamingResponse(
         frame_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame"
@@ -138,7 +240,11 @@ async def camera_feed():
 
 
 @app.get("/capture")
-async def capture():
+async def capture(request: Request):
+    unauthorized = require_control_token(request)
+    if unauthorized:
+        return unauthorized
+
     try:
         jpeg = await get_camera_jpeg()
         if not jpeg:

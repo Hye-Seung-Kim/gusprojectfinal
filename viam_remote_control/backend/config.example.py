@@ -14,5 +14,5 @@ VIAM_API_KEY = os.environ["VIAM_API_KEY"]
 VIAM_API_KEY_ID = os.environ["VIAM_API_KEY_ID"]
 CONTROL_TOKEN = os.getenv("CONTROL_TOKEN", "")
 
-BASE_NAME = "viam_base"   # Viam UI에 보이는 base 이름
-CAMERA_NAME = "cam"       # Viam UI에 보이는 camera 이름
+BASE_NAME = "viam_base"
+CAMERA_NAME = "cam"

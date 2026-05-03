@@ -10,6 +10,8 @@ from config import (
 async def connect_robot():
     opts = RobotClient.Options(
         refresh_interval=0,
+        check_connection_interval=0,
+        attempt_reconnect_interval=0,
         dial_options=DialOptions.with_api_key(
             api_key=VIAM_API_KEY,
             api_key_id=VIAM_API_KEY_ID,

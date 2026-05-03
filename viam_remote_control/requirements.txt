@@ -3,3 +3,5 @@ uvicorn[standard]
 viam-sdk
 python-dotenv
 Pillow
+numpy
+opencv-python-headless

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BACKEND_URL } from "./api";
+import { authHeaders, BACKEND_URL } from "./api";
 
 const directions = {
   forward: "up",
@@ -8,15 +8,20 @@ const directions = {
   left: "left",
 };
 
-export default function Controls() {
+export default function Controls({ token }) {
   const [busyDirection, setBusyDirection] = useState("");
   const [captureState, setCaptureState] = useState("idle");
 
   const sendCommand = async (direction) => {
+    if (busyDirection) {
+      return;
+    }
+
     setBusyDirection(direction);
     try {
       const response = await fetch(`${BACKEND_URL}/move/${direction}`, {
         method: "POST",
+        headers: authHeaders(token),
       });
 
       if (!response.ok) {
@@ -31,7 +36,9 @@ export default function Controls() {
     setCaptureState("saving");
 
     try {
-      const response = await fetch(`${BACKEND_URL}/capture`);
+      const response = await fetch(`${BACKEND_URL}/capture`, {
+        headers: authHeaders(token),
+      });
 
       if (!response.ok) {
         throw new Error(`Capture failed: ${response.status}`);
@@ -68,6 +75,7 @@ export default function Controls() {
             type="button"
             aria-label={direction}
             data-active={busyDirection === direction}
+            disabled={Boolean(busyDirection)}
             onClick={() => sendCommand(direction)}
           >
             <span>{label}</span>
@@ -77,7 +85,12 @@ export default function Controls() {
       </div>
 
       <div className="action-row">
-        <button className="stop-button" type="button" onClick={() => sendCommand("stop")}>
+        <button
+          className="stop-button"
+          type="button"
+          disabled={Boolean(busyDirection)}
+          onClick={() => sendCommand("stop")}
+        >
           Stop
         </button>
         <button
