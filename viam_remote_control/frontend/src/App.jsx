@@ -6,6 +6,7 @@ import "./App.css";
 
 function App() {
   const [token, setToken] = useState(storedToken);
+  const hasToken = token.length > 0;
 
   const updateToken = (event) => {
     const nextToken = event.target.value.trim();
@@ -33,10 +34,19 @@ function App() {
         </label>
       </header>
 
-      <main>
-        <CameraView token={token} />
-        <Controls token={token} />
-      </main>
+      {hasToken ? (
+        <main>
+          <CameraView token={token} />
+          <Controls token={token} />
+        </main>
+      ) : (
+        <main className="locked-main">
+          <section className="locked-panel">
+            <h2>Enter the passcode to open camera and controls.</h2>
+            <p>The camera will stay off until a passcode is entered.</p>
+          </section>
+        </main>
+      )}
     </div>
   );
 }
