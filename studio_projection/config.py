@@ -1,6 +1,6 @@
-VIAM_ADDRESS    = "svahardmode3-main.izw30ekwtj.viam.cloud"
-VIAM_API_KEY    = "iz3o4ebr7jbld1kyl51x84girbf0tp2o"
-VIAM_API_KEY_ID = "451a7cce-7e80-4cfe-8ba8-e2e62034bb3a"
+VIAM_ADDRESS    = "svahardmodefinal-main.izw30ekwtj.viam.cloud"
+VIAM_API_KEY    = "8nje23cmyvkvoj40xwmb5l7k7chj6mr2"
+VIAM_API_KEY_ID = "7b6b5c48-4e14-4e77-82cb-b9a7fa5e9370"
 
 CAMERA_NAME = "cam"
 
