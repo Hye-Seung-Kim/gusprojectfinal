@@ -3,12 +3,11 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from viam.components.base import Base
+from viam.components.base.base import Vector3
 from viam.components.camera import Camera
-import cv2
 import io
-import numpy as np
 from PIL import Image
 
 from viam_client import connect_robot
@@ -29,11 +28,12 @@ robot = None
 base = None
 camera = None
 connect_lock = asyncio.Lock()
+robot_io_lock = asyncio.Lock()
 CAPTURE_DIR = Path(__file__).resolve().parent / "captures"
-STEP_DISTANCE_MM = 8
-STEP_VELOCITY_MM_S = 35
-TURN_ANGLE_DEG = 3
-TURN_VELOCITY_DEG_S = 25
+LINEAR_VELOCITY_MM_S = 90
+ANGULAR_VELOCITY_DEG_S = 45
+MOVE_PULSE_SECONDS = 0.14
+MOVE_TIMEOUT_SECONDS = 3
 OFFLINE_RETRY_SECONDS = 2.0
 
 
@@ -50,22 +50,29 @@ def require_control_token(request: Request):
 
 def viam_image_to_cv2(viam_image):
     pil_img = Image.open(io.BytesIO(viam_image.data))
-    rgb = np.array(pil_img)
-    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    return pil_img.convert("RGB")
+
+
+def encode_jpeg(viam_image):
+    if str(viam_image.mime_type) == "image/jpeg":
+        return viam_image.data
+
+    img = viam_image_to_cv2(viam_image)
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=85)
+    return buffer.getvalue()
 
 
 async def get_camera_jpeg():
     await ensure_robot_connected()
-    images, _ = await camera.get_images()
+
+    async with robot_io_lock:
+        images, _ = await camera.get_images(timeout=5)
+
     if not images:
         return None
 
-    frame = viam_image_to_cv2(images[0])
-    ok, jpeg = cv2.imencode(".jpg", frame)
-    if not ok:
-        return None
-
-    return jpeg.tobytes()
+    return encode_jpeg(images[0])
 
 
 @app.on_event("startup")
@@ -117,28 +124,32 @@ async def safe_stop():
         print("stop error:", e)
 
 
-async def tiny_move_straight(distance):
-    try:
-        velocity = STEP_VELOCITY_MM_S if distance > 0 else -STEP_VELOCITY_MM_S
-        await base.move_straight(
-            distance=distance,
-            velocity=velocity,
-            timeout=1,
-        )
-    finally:
-        await safe_stop()
+async def tiny_move_straight(direction):
+    async with robot_io_lock:
+        try:
+            velocity = LINEAR_VELOCITY_MM_S if direction > 0 else -LINEAR_VELOCITY_MM_S
+            await base.set_velocity(
+                linear=Vector3(x=0, y=velocity, z=0),
+                angular=Vector3(x=0, y=0, z=0),
+                timeout=MOVE_TIMEOUT_SECONDS,
+            )
+            await asyncio.sleep(MOVE_PULSE_SECONDS)
+        finally:
+            await safe_stop()
 
 
-async def tiny_spin(angle):
-    try:
-        velocity = TURN_VELOCITY_DEG_S if angle > 0 else -TURN_VELOCITY_DEG_S
-        await base.spin(
-            angle=angle,
-            velocity=velocity,
-            timeout=1,
-        )
-    finally:
-        await safe_stop()
+async def tiny_spin(direction):
+    async with robot_io_lock:
+        try:
+            velocity = ANGULAR_VELOCITY_DEG_S if direction > 0 else -ANGULAR_VELOCITY_DEG_S
+            await base.set_velocity(
+                linear=Vector3(x=0, y=0, z=0),
+                angular=Vector3(x=0, y=0, z=velocity),
+                timeout=MOVE_TIMEOUT_SECONDS,
+            )
+            await asyncio.sleep(MOVE_PULSE_SECONDS)
+        finally:
+            await safe_stop()
 
 
 @app.post("/move/{direction}")
@@ -151,15 +162,16 @@ async def move(direction: str, request: Request):
         await ensure_robot_connected()
 
         if direction == "forward":
-            await tiny_move_straight(STEP_DISTANCE_MM)
+            await tiny_move_straight(1)
         elif direction == "backward":
-            await tiny_move_straight(-STEP_DISTANCE_MM)
+            await tiny_move_straight(-1)
         elif direction == "left":
-            await tiny_spin(TURN_ANGLE_DEG)
+            await tiny_spin(1)
         elif direction == "right":
-            await tiny_spin(-TURN_ANGLE_DEG)
+            await tiny_spin(-1)
         elif direction == "stop":
-            await safe_stop()
+            async with robot_io_lock:
+                await safe_stop()
         else:
             return JSONResponse({"error": "unknown direction"}, status_code=400)
 
@@ -237,6 +249,29 @@ async def camera_feed(request: Request):
         frame_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+
+@app.get("/camera.jpg")
+async def camera_snapshot(request: Request):
+    unauthorized = require_control_token(request)
+    if unauthorized:
+        return unauthorized
+
+    try:
+        jpeg = await get_camera_jpeg()
+        if not jpeg:
+            return JSONResponse({"error": "no camera image available"}, status_code=503)
+
+        return Response(
+            content=jpeg,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+            },
+        )
+    except Exception as e:
+        print("camera snapshot error:", e)
+        return JSONResponse({"error": "camera unavailable"}, status_code=503)
 
 
 @app.get("/capture")

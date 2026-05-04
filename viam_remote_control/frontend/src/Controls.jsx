@@ -11,6 +11,7 @@ const directions = {
 export default function Controls({ token }) {
   const [busyDirection, setBusyDirection] = useState("");
   const [captureState, setCaptureState] = useState("idle");
+  const [moveState, setMoveState] = useState("");
 
   const sendCommand = async (direction) => {
     if (busyDirection) {
@@ -18,6 +19,7 @@ export default function Controls({ token }) {
     }
 
     setBusyDirection(direction);
+    setMoveState("");
     try {
       const response = await fetch(`${BACKEND_URL}/move/${direction}`, {
         method: "POST",
@@ -25,8 +27,15 @@ export default function Controls({ token }) {
       });
 
       if (!response.ok) {
-        throw new Error(`Move failed: ${response.status}`);
+        setMoveState(`Move failed (${response.status})`);
+        return;
       }
+
+      setMoveState(direction === "stop" ? "Stopped" : "Moved");
+      window.setTimeout(() => setMoveState(""), 1200);
+    } catch (error) {
+      console.error(error);
+      setMoveState("Move failed");
     } finally {
       setBusyDirection("");
     }
@@ -104,6 +113,7 @@ export default function Controls({ token }) {
       </div>
 
       <p className="status" role="status">
+        {moveState}
         {captureState === "saved" && "Photo saved"}
         {captureState === "error" && "Capture failed"}
       </p>
