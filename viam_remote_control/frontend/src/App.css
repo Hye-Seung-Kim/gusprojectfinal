@@ -93,6 +93,10 @@ main {
   min-width: 0;
 }
 
+.camera-frame {
+  position: relative;
+}
+
 .camera-feed {
   display: block;
   width: 100%;
@@ -103,6 +107,38 @@ main {
   border-radius: 8px;
   box-shadow: 0 18px 42px rgba(24, 30, 38, 0.22);
   box-sizing: border-box;
+}
+
+.camera-overlay {
+  position: absolute;
+  inset: 10px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  background: rgba(7, 9, 12, 0.82);
+  border-radius: 0;
+  color: #f8fafc;
+  text-align: center;
+}
+
+.camera-overlay p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.camera-overlay button {
+  min-height: 40px;
+  border: 1px solid rgba(248, 250, 252, 0.28);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #111419;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  padding: 8px 16px;
 }
 
 .controls {
