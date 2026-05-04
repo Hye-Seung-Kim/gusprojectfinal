@@ -36,6 +36,8 @@ FADE_RATE   = 0.08
 HOLD_FRAMES = 15
 CONF_THRESH = 0.02
 GAMMA       = 0.8
+CONTRAST    = 1.5    # >1 = more contrast (try 1.3–2.0)
+BRIGHTNESS  = 0.05   # 0–1 additive lift (try 0.0–0.15)
 PAD         = 120
 
 MODEL_PATH  = os.path.join(os.path.dirname(__file__), "selfie_segmenter_landscape.tflite")
@@ -106,10 +108,12 @@ def make_canvas(frame, mask, cw, ch):
     canvas = np.zeros((ch, cw, 3), dtype=np.uint8)
 
     if mask is not None:
-        # Gamma lift to bring up black fur before compositing
-        lifted  = np.power(np.clip(frame.astype(np.float32) / 255.0, 0.0, 1.0), GAMMA)
-        frame_s = cv2.resize(np.clip(lifted * 255, 0, 255).astype(np.uint8), (nw, nh))
-        mask_s  = cv2.resize(mask, (nw, nh))[:, :, np.newaxis]
+        # Gamma lift + contrast boost for projector visibility
+        lifted   = np.power(np.clip(frame.astype(np.float32) / 255.0, 0.0, 1.0), GAMMA)
+        # Contrast: alpha>1 increases contrast, beta shifts brightness
+        boosted  = np.clip(lifted * CONTRAST + BRIGHTNESS, 0.0, 1.0)
+        frame_s  = cv2.resize((boosted * 255).astype(np.uint8), (nw, nh))
+        mask_s   = cv2.resize(mask, (nw, nh))[:, :, np.newaxis]
         canvas[oy:oy+nh, ox:ox+nw] = (frame_s.astype(np.float32) * mask_s).astype(np.uint8)
     else:
         cv2.putText(canvas, "Waiting for Gus...", (20, 40),
