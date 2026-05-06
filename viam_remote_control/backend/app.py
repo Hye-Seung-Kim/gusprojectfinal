@@ -66,8 +66,14 @@ def encode_jpeg(viam_image):
 async def get_camera_jpeg():
     await ensure_robot_connected()
 
-    async with robot_io_lock:
-        images, _ = await camera.get_images(timeout=5)
+    try:
+        async with robot_io_lock:
+            images, _ = await camera.get_images(timeout=5)
+    except Exception:
+        await reset_robot_connection()
+        await ensure_robot_connected()
+        async with robot_io_lock:
+            images, _ = await camera.get_images(timeout=5)
 
     if not images:
         return None
@@ -82,9 +88,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    global robot
-    if robot:
-        await robot.close()
+    await reset_robot_connection()
 
 
 @app.get("/")
@@ -114,6 +118,21 @@ async def ensure_robot_connected():
             base = None
             camera = None
             raise
+
+
+async def reset_robot_connection():
+    global robot, base, camera
+    old_robot = robot
+
+    robot = None
+    base = None
+    camera = None
+
+    if old_robot:
+        try:
+            await old_robot.close()
+        except Exception as e:
+            print("robot close error:", e)
 
 
 async def safe_stop():
@@ -158,7 +177,7 @@ async def move(direction: str, request: Request):
     if unauthorized:
         return unauthorized
 
-    try:
+    async def run_move():
         await ensure_robot_connected()
 
         if direction == "forward":
@@ -176,9 +195,18 @@ async def move(direction: str, request: Request):
             return JSONResponse({"error": "unknown direction"}, status_code=400)
 
         return {"ok": True, "direction": direction}
+
+    try:
+        return await run_move()
     except Exception as e:
         print("move error:", e)
-        return JSONResponse({"error": "robot unavailable"}, status_code=503)
+        try:
+            await reset_robot_connection()
+            return await run_move()
+        except Exception as retry_error:
+            print("move retry error:", retry_error)
+            await reset_robot_connection()
+            return JSONResponse({"error": "robot unavailable"}, status_code=503)
 
 
 @app.get("/diagnostics")
@@ -189,15 +217,14 @@ async def diagnostics(request: Request):
 
     try:
         await ensure_robot_connected()
-        resources = [
-            {
-                "namespace": resource.namespace,
-                "type": resource.type,
-                "subtype": resource.subtype,
-                "name": resource.name,
-            }
-            for resource in robot.resource_names
-        ]
+        try:
+            await robot.refresh()
+        except Exception:
+            await reset_robot_connection()
+            await ensure_robot_connected()
+            await robot.refresh()
+
+        resources = resource_list()
 
         return {
             "ok": True,
@@ -208,6 +235,7 @@ async def diagnostics(request: Request):
         }
     except Exception as e:
         print("diagnostics error:", e)
+        await reset_robot_connection()
         return JSONResponse(
             {
                 "ok": False,
@@ -218,6 +246,18 @@ async def diagnostics(request: Request):
             },
             status_code=503,
         )
+
+
+def resource_list():
+    return [
+        {
+            "namespace": resource.namespace,
+            "type": resource.type,
+            "subtype": resource.subtype,
+            "name": resource.name,
+        }
+        for resource in robot.resource_names
+    ]
 
 
 async def frame_generator():
